@@ -1,7 +1,7 @@
 #include <libavutil/imgutils.h>
 #include <libavformat/rtsp.h>
 #include <stdio.h>
-
+#include <sys/time.h>
 
 
 double ntp_timestamp(AVFormatContext *pFormatCtx, uint32_t *last_rtcp_ts, double *base_time) {
@@ -9,20 +9,17 @@ double ntp_timestamp(AVFormatContext *pFormatCtx, uint32_t *last_rtcp_ts, double
 	RTSPStream* rtsp_stream = rtsp_state->rtsp_streams[0];
 	RTPDemuxContext* rtp_demux_context = (RTPDemuxContext*) rtsp_stream->transport_priv;
 
-	/*
-	printf("timestamp:                %d\n", rtp_demux_context->timestamp);
-	printf("base_timestamp:           %d\n", rtp_demux_context->base_timestamp);
-	printf("cur_timestamp:            %d\n", rtp_demux_context->cur_timestamp);
-	printf("last_rtcp_ntp_time:       %ld\n", rtp_demux_context->last_rtcp_ntp_time);
-	printf("last_rtcp_reception_time: %ld\n", rtp_demux_context->last_rtcp_reception_time);
-	printf("first_rtcp_ntp_time:      %ld\n", rtp_demux_context->first_rtcp_ntp_time);
-	printf("last_rtcp_timestamp:      %d\n", rtp_demux_context->last_rtcp_timestamp);
+	
+	// printf("timestamp:                %u\n", rtp_demux_context->timestamp);
+	// printf("base_timestamp:           %u\n", rtp_demux_context->base_timestamp);
+	// // printf("cur_timestamp:            %u\n", rtp_demux_context->cur_timestamp);
+	// printf("last_rtcp_ntp_time:       %lu\n", rtp_demux_context->last_rtcp_ntp_time);
+	// printf("last_rtcp_reception_time: %ld\n", rtp_demux_context->last_rtcp_reception_time);
+	// printf("first_rtcp_ntp_time:      %lu\n", rtp_demux_context->first_rtcp_ntp_time);
+	// printf("last_rtcp_timestamp:      %u\n", rtp_demux_context->last_rtcp_timestamp);
 
-	printf("diff: %d\n",(rtp_demux_context->timestamp-rtp_demux_context->base_timestamp));
-	printf("====================================\n");*/
-
-
-	//ntp time extraction for DAHUA Cameras
+	// printf("diff: %d\n",(rtp_demux_context->timestamp - rtp_demux_context->base_timestamp));
+	// printf("====================================\n");
 
 	uint32_t new_rtcp_ts = rtp_demux_context->last_rtcp_timestamp;
 	uint64_t last_ntp_time = 0;
@@ -36,49 +33,44 @@ double ntp_timestamp(AVFormatContext *pFormatCtx, uint32_t *last_rtcp_ts, double
 		*base_time = seconds+useconds;
 	}
 
-	int32_t d_ts = rtp_demux_context->timestamp-*last_rtcp_ts;
-	return *base_time+d_ts/90000.0;
+	int32_t d_ts = rtp_demux_context->timestamp - *last_rtcp_ts;
+	return *base_time + d_ts/90000.0;
 }
 
-
-int decode(int* got_frame, AVFrame* pFrame, AVCodecContext* pCodecCtx, AVPacket* packet) {
-	*got_frame = 0;
-
-	int ret = avcodec_send_packet(pCodecCtx, packet);
-
-	if (ret < 0)
-		return ret == AVERROR_EOF ? 0 : ret;
-
-	ret = avcodec_receive_frame(pCodecCtx, pFrame);
-
-	if (ret < 0 && ret != AVERROR(EAGAIN) && ret != AVERROR_EOF)
-		return ret;
-
-	if (ret >= 0)
-		*got_frame = 1;
-
-	return 0;
+double clock_timestamp()
+{
+	struct timeval tv;
+    gettimeofday(&tv, NULL);
+	double ts = (double)tv.tv_sec;
+	double ts_usec =+ (double)tv.tv_usec/1000000.0;
+	ts = ts + ts_usec;
+    printf("Seconds since Jan. 1, 1970: %lf\n", ts);
+    return ts;
 }
-
 
 
 int main(int argc, char *argv[]) {
-	//av_log_set_level(AV_LOG_DEBUG);
-	av_log_set_level(0);
+	// av_log_set_level(AV_LOG_DEBUG);
+	// av_log_set_level(0);
 
 	AVCodecParameters * origin_par = NULL;
 	AVCodec           * pCodec = NULL;
 	AVFormatContext   * pFormatCtx = NULL;
 	AVCodecContext    * pCodecCtx = NULL;
 	AVFrame           * pFrame = NULL;
+    // Image_FFMPEG picture;
+    // AVFrame rgb_frame;
+
 	AVPacket          packet;
 	int               videoStream = -1;
-	uint32_t					frame_size = 1280*720*1.5;
+	// uint32_t		frame_size = 640*368*1.5;
 
-	uint8_t network_mode = 0;
+	uint8_t network_mode = 1;
 	int result;
-	char* rtsp_source = "rtsp://admin:12345@10.50.0.59:554/Streaming/Channels/1";
+	char* rtsp_source = "rtsp://admin:@10.130.11.145:554/h264Preview_01_sub";
+//  char* rtsp_source = "rtsp://admin:AIRS2022HIK@10.130.11.64:554/Streaming/channels/101/0:0";
 
+    av_register_all();
 	avformat_network_init();
 
 	av_init_packet(&packet);
@@ -109,14 +101,14 @@ int main(int argc, char *argv[]) {
 		return 0;
 	}
 
-	videoStream = av_find_best_stream(pFormatCtx, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
+	videoStream = av_find_best_stream(pFormatCtx, AVMEDIA_TYPE_VIDEO, -1, -1, &pCodec, 0);
 	if (videoStream == -1) {
 		av_log(NULL, AV_LOG_ERROR, "Couldn't find video stream\n");
 		return 0;
 	}
 
 	origin_par = pFormatCtx->streams[videoStream]->codecpar;
-	pCodec = avcodec_find_decoder(origin_par->codec_id);
+	//pCodec = avcodec_find_decoder(origin_par->codec_id);
 	//pCodec = avcodec_find_decoder_by_name("h264_cuvid");
 
 	if (pCodec == NULL) {
@@ -149,8 +141,9 @@ int main(int argc, char *argv[]) {
 		return 0;
 	}
 
-	int byte_buffer_size = av_image_get_buffer_size(pCodecCtx->pix_fmt, pCodecCtx->width, pCodecCtx->height, 16);
-	byte_buffer_size = byte_buffer_size < frame_size ? byte_buffer_size : frame_size;
+    av_dump_format(pFormatCtx, 0, rtsp_source, 0);
+	//int byte_buffer_size = av_image_get_buffer_size(pCodecCtx->pix_fmt, pCodecCtx->width, pCodecCtx->height, 16);
+	//byte_buffer_size = byte_buffer_size < frame_size ? byte_buffer_size : frame_size;
 
 	int number_of_written_bytes;
 	int got_frame;
@@ -161,52 +154,134 @@ int main(int argc, char *argv[]) {
 
 	FILE *output_file = NULL;
 
-	while (av_read_frame(pFormatCtx, &packet) >= 0) {
-		if (decode(&got_frame, pFrame, pCodecCtx, &packet) < 0) {
-			av_log(NULL, AV_LOG_ERROR, "Decoding error\n");
-			break;
-		}
+	// bool valid = false;
 
-		if (got_frame) {
-			double ts = ntp_timestamp(pFormatCtx, &last_rtcp_ts, &base_time);
+	double last_ts = 0;
+	int64_t last_pts;
 
-			// frame
-			frame_data = av_malloc(byte_buffer_size);
+	while(1)
+	{
+		av_packet_unref(&packet);
+		while(av_read_frame(pFormatCtx, &packet) >= 0) 
+		{
+			// av_packet_unref(&packet);
+			// read next packet from the stream
+			
+			// if the packet is not from the video stream don't do anything and get next packet
+			if (packet.stream_index != videoStream) {
+				av_packet_unref(&packet);
+				continue;
+			}
 
-			if (!frame_data) {
-				av_log(NULL, AV_LOG_ERROR, "Couldn't allocate buffer\n");
+			// decode the video frame
+			if (avcodec_decode_video2(pCodecCtx, pFrame, &got_frame, &packet) < 0) { 
+			// if (decode(&got_frame, pFrame, pCodecCtx, &packet) < 0) {
+				av_log(NULL, AV_LOG_ERROR, "Decoding error\n");
 				break;
 			}
 
-			number_of_written_bytes = av_image_copy_to_buffer(
-				frame_data, byte_buffer_size,
-				(const uint8_t* const *) pFrame->data,
-				(const int*) pFrame->linesize,
-				pCodecCtx->pix_fmt,
-				pCodecCtx->width, pCodecCtx->height, 1);
+			if(got_frame) 
+			{
+                double clock_ts = clock_timestamp();
+				double ts = ntp_timestamp(pFormatCtx, &last_rtcp_ts, &base_time);
+				printf("Timestamp %lf\n", ts);
+				printf("%lf\n", ts-last_ts);
+				printf("Delay %lf\n", clock_ts-ts);
+				last_ts = ts;
 
-			if (number_of_written_bytes < 0) {
-				av_log(NULL, AV_LOG_ERROR, "Couldn't copy to buffer\n");
-				break;
+				printf("PTS %ld\n", packet.pts);
+				printf("%ld\n", packet.pts-last_pts);
+				last_pts = packet.pts;
+				// frame
+				// frame_data = av_malloc(byte_buffer_size);
+
+				// if (!frame_data) {
+				// 	av_log(NULL, AV_LOG_ERROR, "Couldn't allocate buffer\n");
+				// 	break;
+				// }
+
+				// number_of_written_bytes = av_image_copy_to_buffer(
+				// 	frame_data, byte_buffer_size,
+				// 	(const uint8_t* const *) pFrame->data,
+				// 	(const int*) pFrame->linesize,
+				// 	pCodecCtx->pix_fmt,
+				// 	pCodecCtx->width, pCodecCtx->height, 1);
+
+				// if (number_of_written_bytes < 0) {
+				// 	av_log(NULL, AV_LOG_ERROR, "Couldn't copy to buffer\n");
+				// 	break;
+				// }
+
+				// //write YUV frames to files
+				// /*char file_name_buf[30];
+				// snprintf(file_name_buf, 30, "output/ts_%f_yuv", ts);
+
+				// output_file = fopen(file_name_buf, "w+");
+
+				// if (fwrite(frame_data, 1, byte_buffer_size, output_file) < 0) {
+				// 	fprintf(stderr, "Failed to dump raw data.\n");
+				// } else {
+				// 	fclose(output_file);
+				// }*/
+
+				// free(frame_data);
+
+				// av_packet_unref(&packet);
+				// av_init_packet(&packet);
+
+				// valid = true;
+
 			}
-
-			//write YUV frames to files
-			/*char file_name_buf[30];
-			snprintf(file_name_buf, 30, "output/ts_%f_yuv", ts);
-
-			output_file = fopen(file_name_buf, "w+");
-
-			if (fwrite(frame_data, 1, byte_buffer_size, output_file) < 0) {
-				fprintf(stderr, "Failed to dump raw data.\n");
-      } else {
-				fclose(output_file);
-			}*/
-
-			free(frame_data);
-
-			av_packet_unref(&packet);
-			av_init_packet(&packet);
 		}
-	}
+	} 	
+	// while (av_read_frame(pFormatCtx, &packet) >= 0) {
+		
+	// 	// if (decode(&got_frame, pFrame, pCodecCtx, &packet) < 0) {
+	// 	if (avcodec_decode_video2(pCodecCtx, pFrame, &got_frame, &packet)){
+	// 		av_log(NULL, AV_LOG_ERROR, "Decoding error\n");
+	// 		continue;
+	// 	}
+
+	// 	if (got_frame) {
+	// 		double ts = ntp_timestamp(pFormatCtx, &last_rtcp_ts, &base_time);
+
+	// 		// frame
+	// 		frame_data = av_malloc(byte_buffer_size);
+
+	// 		if (!frame_data) {
+	// 			av_log(NULL, AV_LOG_ERROR, "Couldn't allocate buffer\n");
+	// 			break;
+	// 		}
+
+	// 		number_of_written_bytes = av_image_copy_to_buffer(
+	// 			frame_data, byte_buffer_size,
+	// 			(const uint8_t* const *) pFrame->data,
+	// 			(const int*) pFrame->linesize,
+	// 			pCodecCtx->pix_fmt,
+	// 			pCodecCtx->width, pCodecCtx->height, 1);
+
+	// 		if (number_of_written_bytes < 0) {
+	// 			av_log(NULL, AV_LOG_ERROR, "Couldn't copy to buffer\n");
+	// 			break;
+	// 		}
+
+	// 		//write YUV frames to files
+	// 		/*char file_name_buf[30];
+	// 		snprintf(file_name_buf, 30, "output/ts_%f_yuv", ts);
+
+	// 		output_file = fopen(file_name_buf, "w+");
+
+	// 		if (fwrite(frame_data, 1, byte_buffer_size, output_file) < 0) {
+	// 			fprintf(stderr, "Failed to dump raw data.\n");
+    //   } else {
+	// 			fclose(output_file);
+	// 		}*/
+
+	// 		free(frame_data);
+
+	// 		av_packet_unref(&packet);
+	// 		av_init_packet(&packet);
+	// 	}
+	// }
 	return 0;
 }
